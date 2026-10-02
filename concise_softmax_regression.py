@@ -22,7 +22,7 @@ class SoftmaxRegression(d2l.Classifier): #@save
 def loss(self, Y_hat, Y, averaged=True):
     Y_hat = Y_hat.reshape((-1, Y_hat.shape[-1]))
     Y = Y.reshape((-1,))
-
+    
     return F.cross_entropy(Y_hat, Y, reduction="mean" if averaged else "None")
 
 data = d2l.FashionMNIST(batch_size=256)
