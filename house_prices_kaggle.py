@@ -39,6 +39,20 @@ def preprocess(self):
     self.train[label] = self.raw_train[label]
     self.val = features[self.raw_train.shape[0]:].copy()
 
+@d2l.add_to_class(KaggleHouse)
+def get_dataloader(self, train):
+    label = "SalePrice"
+    data = self.train if train else self.val
+    if label not in data:
+        return
+
+    get_tensor = lambda x: torch.tensor(x.values.astype(float), dtype=torch.float32)
+
+    # Logarithm of prices
+    tensors = (get_tensor(data.drop(columns=[label])), torch.log(get_tensor(data[label])).reshape((-1, 1)))
+
+    return self.get_tensorloader(tensors, train)
+
 def download(url, folder, sha1_hash=None):
     """Download a file to folder and return the local filepath."""
     raise NotImplementedError
@@ -47,6 +61,31 @@ def extract(filename, folder):
     """Extract zip/tar file into folder."""
     raise NotImplementedError
 
+def k_fold_data(data, k):
+    rets = []
+    fold_size = data.train.shape[0] // k
+
+    for j in range(k):
+        idx = range(j * fold_size, (j+1) * fold_size)
+        rets.append(KaggleHouse(data.batch_size, data.train.drop(index=idx), data.train.loc[idx]))
+
+    return rets
+
+def k_fold(trainer, data, k, lr):
+    val_loss, models = [], []
+
+    for i, data_fold in enumerate(k_fold_data(data, k)):
+        model = d2l.LinearRegression(lr)
+        model.board.yscale = "log"
+        if i != 0: model.board.display = False
+
+        trainer.fit(model, data_fold)
+        val_loss.append(float(model.board.data["val_loss"][-1].y))
+        models.append(model)
+
+    print(f"average validation log mse = {sum(val_loss)/len(val_loss)}")
+    return models
+
 data = KaggleHouse(batch_size=64)
 print(data.raw_train.shape)
 print(data.raw_val.shape)
@@ -54,3 +93,13 @@ print(data.raw_train.iloc[:4, [0,1,2,3,-3,-2,-1]])
 
 data.preprocess()
 print(data.train.shape)
+
+trainer = d2l.Trainer(max_epochs=10)
+models = k_fold(trainer, data, k=5, lr=0.01)
+
+preds = [model(torch.tensor(data.val.values.astype(float), dtype=torch.float32)) for model in models]
+
+# Taking exponentiation of predictions in the logarithm scale
+ensemble_preds = torch.exp(torch.cat(preds, 1)).mean(1)
+submission = pd.DataFrame({"Id": data.raw_val.Id, "SalePrice": ensemble_preds.detach().numpy()})
+submission.to_csv("submission.csv", index=False)
